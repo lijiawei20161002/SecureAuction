@@ -1,0 +1,17 @@
+README.md
+setup.cfg
+setup.py
+mpyc/__init__.py
+mpyc/asyncoro.py
+mpyc/bfield.py
+mpyc/gf2x.py
+mpyc/gmpy.py
+mpyc/pfield.py
+mpyc/random.py
+mpyc/runtime.py
+mpyc/sectypes.py
+mpyc/thresha.py
+mpyc.egg-info/PKG-INFO
+mpyc.egg-info/SOURCES.txt
+mpyc.egg-info/dependency_links.txt
+mpyc.egg-info/top_level.txt

@@ -185,5 +185,4 @@ for i in range(1, m):
         else:
             print('Sorry, you are the loser.')  # loser's result are all random ints (non zero)
 
-
 mpc.run(mpc.shutdown())

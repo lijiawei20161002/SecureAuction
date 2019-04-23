@@ -17,6 +17,7 @@ All rights reserved.
 """Secure auction."""
 import random
 import sys
+from elgamal import generate_keys
 from mpyc.runtime import mpc
 
 
@@ -35,6 +36,11 @@ total_unit = int(sys.argv[2])  # total unit of goods we have
 bids = [[None] * (n+1)] * m  # buyer's bids, random generation
 s = [0] * (n+1)  # accumulation of bids
 c = [None] * (n+1)  # mask vector
+key = generate_keys(10, 10)  # elgamal keys
+p = key['publicKey'][0]
+g = key['publicKey'][1]
+y = key['publicKey'][2]
+x = key['privateKey'][2]
 
 
 # buyer's bid, random generation
@@ -143,17 +149,35 @@ def winner_deter():
     return n
 
 
+'''Zero Knowledge Proof'''
+def ZK1(g, x, p, i):
+    y = pow(g, x, p)
+    z = random.randint(1, p-1)
+    zz = mpc.input(sec_num(z))
+    zzz = mpc.run(mpc.output(zz))[i]
+    c = random.randint(1, p-1)
+    cc = mpc.input(sec_num(c))
+    ccc = mpc.run(mpc.output(cc))[i]
+    r = (z + x*(int(ccc))) % p
+    rr = mpc.input(sec_num(r))
+    rrr = mpc.run(mpc.output(rr))[i]
+    if pow(g, int(rrr), p) == pow(g, int(zzz), p)*pow(y, c, p) % p:
+        return True
+    else:
+        return False
+
+
 '''offline phase, bid generation'''
 if pid == 0:
     print('You are the auctioneer.')
-    print('The parties involved in the auction are:')
+    # print('The parties involved in the auction are:')
 else:
     unit = random.randint(1, total_unit)
     price = random.randint(1, n)
     bids[pid] = generate_bid(unit, price)  # random generation of bids
     print(f'You are buyer {pid} holding bid {bids[pid]}.')
-for i in range(m):
-    print(mpc.parties[i])
+# for i in range(m):
+    # print(mpc.parties[i])
 
 
 '''online phase, winner determination and result information'''
@@ -164,12 +188,14 @@ for i in range(1, m):
     y = mpc.run(mpc.output(x, 0))  # send the encrypted bid to auctioneer
     if y != [None] * (n+1):
         s = vector_add(s, y)  # auctioneer can only see the accumulation of all encrypted bids
+    if not ZK1(g, x, p, i):
+        print("Cheating found, player", i)
 
 if pid == 0:
     x = winner_deter()  # computation of the winning price
-    print('winning price is: ', x)
+    # print('winning price is: ', x)
     c = generate_mask(x)  # generate mask vector according to the winning price
-    print(c)
+    # print(c)
 
 for i in range(1, m):
     x = mpc.input(vector_enc(c), 0)  # auctioneer provide mask vector

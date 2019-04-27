@@ -17,7 +17,7 @@ All rights reserved.
 """Secure auction."""
 import random
 import sys
-from elgamal import generate_keys
+from elgamal import generate_keys, encrypt, decrypt
 from mpyc.runtime import mpc
 
 
@@ -36,12 +36,7 @@ total_unit = int(sys.argv[2])  # total unit of goods we have
 bids = [[None] * (n+1)] * m  # buyer's bids, random generation
 s = [0] * (n+1)  # accumulation of bids
 c = [None] * (n+1)  # mask vector
-key = generate_keys(10, 10)  # elgamal keys
-p = key['publicKey'][0]
-g = key['publicKey'][1]
-y = key['publicKey'][2]
-x = key['privateKey'][2]
-
+Key = dict()  # elgamal keys
 
 # buyer's bid, random generation
 def generate_bid(u, p):
@@ -67,7 +62,7 @@ def vector_add(x1, x2):
     return x
 
 
-def vector_enc(v):
+def vector_sec(v):
     l = len(v)
     x = [None] * l
     for i in range(l):
@@ -130,6 +125,22 @@ def in_prod(x1, x2):
     return x
 
 
+def find_price(x):
+    l = len(x)
+    for i in range(l):
+        if x[i] > 0:
+            return i
+    return 0
+
+
+def find_win(x):
+    l = len(x)
+    for i in range(l):
+        if x[i] == 0:
+            return i
+    return 0
+
+
 def zero_count(x):
     cnt = 0
     l = len(x)
@@ -138,6 +149,34 @@ def zero_count(x):
             cnt += 1
     return cnt
 
+
+# ElGamal Encryption
+def vector_enc(v, key):
+    l = len(v)
+    x = [None] * l * 2
+    j = 0
+    if not key[0]:
+        return x
+    if not v[0]:
+        return x
+    for i in range(l):
+        x[j] = encrypt(key, v[i])[0]
+        x[j+1] = encrypt(key, v[i])[1]
+        j = j+2
+    return x
+
+
+def vector_dec(v, key):
+    l = len(v)
+    x = [None] * int(l/2)
+    i = 0
+    if not key[0]:
+        return x
+    for j in range(int(l/2)):
+        if v[i]:
+            x[j] = decrypt(key, [v[i], v[i+1]])
+            i = i+2
+    return x
 
 # computation of the winning price
 def winner_deter():
@@ -150,65 +189,91 @@ def winner_deter():
 
 
 '''Zero Knowledge Proof'''
-def ZK1(g, x, p, i):
-    y = pow(g, x, p)
-    z = random.randint(1, p-1)
+def ZK(g, x, p):
+    y = Key[pid]['publicKey'][2]  # as verifier
+    z = random.randint(1, p-1)  # as verifier
     zz = mpc.input(sec_num(z))
-    zzz = mpc.run(mpc.output(zz))[i]
-    c = random.randint(1, p-1)
+    c = random.randint(1, p - 1)  # as verifier
     cc = mpc.input(sec_num(c))
-    ccc = mpc.run(mpc.output(cc))[i]
-    r = (z + x*(int(ccc))) % p
-    rr = mpc.input(sec_num(r))
-    rrr = mpc.run(mpc.output(rr))[i]
-    if pow(g, int(rrr), p) == pow(g, int(zzz), p)*pow(y, c, p) % p:
-        return True
-    else:
-        return False
+    # as prover
+    for i in range(1, m):
+        # as prover
+        zzz = mpc.run(mpc.output(zz))
+        ccc = mpc.run(mpc.output(cc))
+        r = int(zzz[i]) + x * (int(ccc[i]))
+        rr = mpc.input(sec_num(r))
+        # as verifier
+        rrr = mpc.run(mpc.output(rr))
+        if (pow(g, int(rrr[pid]), p)) != (pow(int(y), int(ccc[i]), p)*pow(g, int(zzz[i]), p) % p):
+            print("Find cheater, player ", pid)
+            return False
+    return True
+
+
+def ZK2(x1, x2):
+    ya1 = mpc.input(sec_num(x1))
+    ya2 = mpc.input(sec_num(x2))
+    for i in range(1, m):
+        yb1 = mpc.run(mpc.output(ya1))
+        yb2 = mpc.run(mpc.output(ya2))
+        if yb1[i] != yb2[i]:
+            print("Find cheater, player ", i)
+            return False
+    return True
 
 
 '''offline phase, bid generation'''
+for i in range(m):
+    Key[i] = {'privateKey': [None] * 3, 'publicKey': [None] * 3}
+Key[pid] = generate_keys(5, 100)
+privateKey = Key[pid]['privateKey']
+publicKey = Key[pid]['publicKey']
 if pid == 0:
     print('You are the auctioneer.')
-    # print('The parties involved in the auction are:')
+    print('The parties involved in the auction are:')
 else:
     unit = random.randint(1, total_unit)
     price = random.randint(1, n)
     bids[pid] = generate_bid(unit, price)  # random generation of bids
     print(f'You are buyer {pid} holding bid {bids[pid]}.')
-# for i in range(m):
-    # print(mpc.parties[i])
+for i in range(m):
+    print(mpc.parties[i])
 
 
 '''online phase, winner determination and result information'''
 mpc.run(mpc.start())
 
 for i in range(1, m):
-    x = mpc.input(vector_enc(bids[i]), i)  # encryption of the bid as input of computation
+    x = mpc.input(vector_sec(bids[i]), i)  # encryption of the bid as input of computation
     y = mpc.run(mpc.output(x, 0))  # send the encrypted bid to auctioneer
     if y != [None] * (n+1):
         s = vector_add(s, y)  # auctioneer can only see the accumulation of all encrypted bids
-    if not ZK1(g, x, p, i):
-        print("Cheating found, player", i)
 
 if pid == 0:
-    x = winner_deter()  # computation of the winning price
-    # print('winning price is: ', x)
-    c = generate_mask(x)  # generate mask vector according to the winning price
-    # print(c)
+    win = winner_deter()  # computation of the winning price
+    print('winning price is: ', win)
+    c = generate_mask(win)  # generate mask vector according to the winning price
+    print(c)
 
 for i in range(1, m):
-    x = mpc.input(vector_enc(c), 0)  # auctioneer provide mask vector
+    x = mpc.input(vector_sec(vector_enc(c, publicKey)), 0)  # auctioneer provide mask vector
     ui = matrix_sub(matrix_upper(n+1), matrix_identity(n+1))
     ub = in_prod(ui, bids[i])
-    y = mpc.input(vector_enc(ub), i)
+    y = mpc.input(vector_sec(vector_enc(ub, publicKey)), i)
     z = mpc.run(mpc.output(mpc.vector_add(x, y), i))  # joint computation of the function
+    z = vector_dec(z, privateKey)
     result = in_prod(matrix_random(n+1), z)
     if result != [None] * (n+1):
         print('secure calculation result: ', result)
         if zero_count(result) == 1:  # winner's result contains one and only one 'zero'
-            print('You are the winner!')
+            print('Bidder', pid, 'You are the winner!')
         else:
-            print('Sorry, you are the loser.')  # loser's result are all random ints (non zero)
+            print('Bidder', pid, 'Sorry, you are the loser.')  # loser's result are all random ints (non zero)
+ZK(privateKey[1], privateKey[2], privateKey[0])
+
+if pid > 0:
+    ZK2(price, find_price(bids[pid]))
+else:
+    ZK2(win, find_win(c))
 
 mpc.run(mpc.shutdown())

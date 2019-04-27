@@ -89,3 +89,20 @@ def generate_keys(iNumBits=256, iConfidence=32):
     privateKey = (p, g, x)
     return {'privateKey': privateKey, 'publicKey': publicKey}
 
+
+def encrypt(key, i):
+    y = random.randint(0, key[0])
+    c = pow(key[1], y, key[0])
+    d = (i*pow(key[2], y, key[0]))
+    return [c, d]
+
+
+def decrypt(key, cipher):
+    if not len(cipher) == 2:
+        return None
+    c = int(cipher[0])
+    d = int(cipher[1])
+    s = pow(c, key[2], key[0])
+    plain = (d*pow(s, key[0]-2, key[0])) % key[0]
+    return plain
+

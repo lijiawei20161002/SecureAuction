@@ -76,7 +76,7 @@ async def _randbelow(sectype, n, bits=False):
             h *= x[i]
         elif await runtime.output(h * x[i]):  # TODO: mul_public
             # restart, keeping unused secret random bits x[:i]
-            x = x[:i] + runtime.random_bits(sectype, k - i)
+            x[i:] = runtime.random_bits(sectype, k - i)
             i = k
     if bits:
         return x
@@ -101,16 +101,17 @@ async def random_unit_vector(sectype, n):
         i -= 1
         if (b >> i) & 1:
             v = runtime.scalar_mul(x[i], u)
-            u = v + runtime.vector_sub(u, v)
+            v.extend(runtime.vector_sub(u, v))
+            u = v
+        elif await runtime.output(u[0] * x[i]):  # TODO: mul_public
+            # restart, keeping unused secret random bits x[:i]
+            x[i:] = runtime.random_bits(sectype, k - i)
+            u[1:] = []
+            i = k
         else:
-            if await runtime.output(u[0] * x[i]):  # TODO: mul_public
-                # restart, keeping unused secret random bits x[:i]
-                x = x[:i] + runtime.random_bits(sectype, k - i)
-                u = [sectype(1)]
-                i = k
-            else:
-                v = runtime.scalar_mul(x[i], u[1:])
-                u = u[:1] + v + runtime.vector_sub(u[1:], v)
+            v = runtime.scalar_mul(x[i], u[1:])
+            v.extend(runtime.vector_sub(u[1:], v))
+            u[1:] = v
     return u
 
 
@@ -122,6 +123,7 @@ def randrange(sectype, start, stop=None, step=1):
     n = len(range(start, stop, step))
     if not n:
         raise ValueError('empty range for randrange()')
+
     return start + _randbelow(sectype, n) * step
 
 
@@ -139,6 +141,7 @@ def choice(sectype, seq):
     """
     if not seq:
         raise IndexError('cannot choose from an empty sequence')
+
     u = random_unit_vector(sectype, len(seq))
     s = 0
     for i in range(len(seq)):
@@ -159,11 +162,14 @@ def choices(sectype, population, weights=None, *, cum_weights=None, k=1):
     if cum_weights is None:
         if weights is None:
             return [choice(sectype, population) for _ in range(k)]
+
         cum_weights = list(itertools.accumulate(weights))
     elif weights is not None:
         raise TypeError('cannot specify both weights and cumulative weights')
+
     if len(cum_weights) != len(population):
         raise ValueError('number of weights does not match the population')
+
     # assume weights are integers
     g = functools.reduce(math.gcd, cum_weights)
     cum_weights = [a // g for a in cum_weights]
@@ -227,7 +233,7 @@ async def random_derangement(sectype, x):
     y = x[:]  # NB: x is assumed to be free of duplicates
     while True:
         shuffle(sectype, y)
-        t = runtime.prod([y[i] - x[i] for i in range(len(x))])
+        t = runtime.prod(runtime.vector_sub(y, x))
         if not await runtime.is_zero_public(t):
             break
     return y
@@ -252,19 +258,8 @@ async def sample(sectype, population, k):
     n = len(population)
     if not 0 <= k <= n:
         raise ValueError('sample larger than population or size is negative')
-    elif not isinstance(population, range):
-        x = list(population)
-        if not isinstance(x[0], sectype):  # assume same type for all elts of x
-            for i in range(len(x)):
-                x[i] = sectype(x[i])
-        for i in range(k):
-            u = random_unit_vector(sectype, n - i)
-            x_u = runtime.in_prod(x[i:], u)
-            d = runtime.scalar_mul(x[i] - x_u, u)
-            x[i] = x_u
-            x[i:] = runtime.vector_add(x[i:], d)
-        return x[:k]
-    else:
+
+    if isinstance(population, range):
         x = []
         while len(x) < k:
             r = randrange(sectype, population.start, population.stop, population.step)
@@ -275,12 +270,25 @@ async def sample(sectype, population, k):
             x.append(r)
         return x
 
+    x = list(population)
+    if not isinstance(x[0], sectype):  # assume same type for all elts of x
+        for i in range(len(x)):
+            x[i] = sectype(x[i])
+    for i in range(k):
+        u = random_unit_vector(sectype, n - i)
+        x_u = runtime.in_prod(x[i:], u)
+        d = runtime.scalar_mul(x[i] - x_u, u)
+        x[i] = x_u
+        x[i:] = runtime.vector_add(x[i:], d)
+    return x[:k]
+
 
 def random(sectype):
     """Uniformly random secret fixed-point number in the range [0.0, 1.0)."""
     f = sectype.field.frac_length
     if not f:
         raise TypeError('secure fixed-point type required')
+
     x = runtime.random_bits(sectype, f)
     return runtime.from_bits(x) * (2 ** -f)
 
@@ -292,5 +300,6 @@ def uniform(sectype, a, b):
     f = sectype.field.frac_length
     if not f:
         raise TypeError('secure fixed-point type required')
+
     s = math.copysign(1, b - a)
     return a + _randbelow(sectype, round(abs(a - b) * 2**f)) * s * (2**-f)

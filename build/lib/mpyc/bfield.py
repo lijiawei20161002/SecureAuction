@@ -11,10 +11,8 @@ from mpyc import gf2x
 
 
 def find_irreducible(d):
-    """Find smallest irreducible polynomial of degree d satisfying given constraints.
-
-    Constraints ... primitive, low weight w=3, 5
-    """
+    """Find smallest irreducible polynomial of degree d."""
+    # TODO: implement constraints, e.g., low weight w=3 or w=5, primitive
     return gf2x.next_irreducible(2**d - 1)
 
 
@@ -36,6 +34,7 @@ def GF(modulus):
     GFElement.modulus = poly
     GFElement.ext_deg = poly.degree()
     GFElement.order = 2**poly.degree()
+    GFElement.byte_length = (GFElement.order.bit_length() + 7) >> 3
     _field_cache[poly] = GFElement
     return GFElement
 
@@ -51,12 +50,10 @@ class BinaryFieldElement():
     modulus = None
     ext_deg = None
     order = None
+    byte_length = None
     frac_length = 0
 
     def __init__(self, value):
-        if isinstance(value, int):
-            assert 0 <= value < self.order
-            value = gf2x.Polynomial(value)
         self.value = value % self.modulus
 
     def __int__(self):
@@ -65,29 +62,18 @@ class BinaryFieldElement():
 
     @classmethod
     def to_bytes(cls, x):
-        """Return an array of bytes representing the given list of polynomials x."""
-        r = (cls.ext_deg + 7) >> 3
-        data = bytearray(2 + len(x) * r)
-        data[:2] = r.to_bytes(2, byteorder='little')
-        j = 2
-        for v in x:
-            if not isinstance(v, int):
-                v = v.value
-            data[j:j + r] = v.to_bytes(r, byteorder='little')
-            j += r
-        return data
+        """Return byte string representing the given list of polynomials x."""
+        byte_order = 'little'
+        r = cls.byte_length
+        return r.to_bytes(2, byte_order) + b''.join(v.to_bytes(r, byte_order) for v in x)
 
     @staticmethod
     def from_bytes(data):
-        """Return the list of integers represented by the given array of bytes."""
-        r = int.from_bytes(data[:2], byteorder='little')
-        n = (len(data) - 2) // r
-        x = [None] * n
-        j = 2
-        for i in range(n):
-            x[i] = int.from_bytes(data[j:j + r], byteorder='little')
-            j += r
-        return x
+        """Return the list of integers represented by the given byte string."""
+        byte_order = 'little'
+        from_bytes = int.from_bytes  # cache
+        r = from_bytes(data[:2], byte_order)
+        return [from_bytes(data[i:i+r], byte_order) for i in range(2, len(data), r)]
 
     def __add__(self, other):
         """Addition."""
@@ -99,7 +85,12 @@ class BinaryFieldElement():
 
         return NotImplemented
 
-    __radd__ = __add__  # TODO: __radd__ may skip first test
+    def __radd__(self, other):
+        """Addition (with reflected arguments)."""
+        if isinstance(other, (int, gf2x.Polynomial)):
+            return type(self)(self.value + other)
+
+        return NotImplemented
 
     def __iadd__(self, other):
         """In-place addition."""
@@ -109,10 +100,11 @@ class BinaryFieldElement():
             return NotImplemented
 
         self.value += other
+        self.value %= self.modulus
         return self
 
     __sub__ = __add__
-    __rsub__ = __add__
+    __rsub__ = __radd__
     __isub__ = __iadd__
 
     def __mul__(self, other):
@@ -125,7 +117,12 @@ class BinaryFieldElement():
 
         return NotImplemented
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        """Multiplication (with reflected arguments)."""
+        if isinstance(other, (int, gf2x.Polynomial)):
+            return type(self)(self.value * other)
+
+        return NotImplemented
 
     def __imul__(self, other):
         """In-place multiplication."""
@@ -135,7 +132,7 @@ class BinaryFieldElement():
             return NotImplemented
 
         self.value *= other
-        self.value %= self.modulus.value
+        self.value %= self.modulus
         return self
 
     def __pow__(self, other):
@@ -143,7 +140,7 @@ class BinaryFieldElement():
         if not isinstance(other, int):
             return NotImplemented
 
-        return type(self)(gf2x.powmod(self.value, other, self.modulus.value))
+        return type(self)(gf2x.powmod(self.value, other, self.modulus))
 
     def __neg__(self):
         """Negation."""
@@ -174,7 +171,7 @@ class BinaryFieldElement():
             return NotImplemented
 
         self.value *= other.reciprocal().value
-        self.value %= self.modulus.value
+        self.value %= self.modulus
         return self
 
     def reciprocal(self):
@@ -198,7 +195,7 @@ class BinaryFieldElement():
             return NotImplemented
 
         self.value <<= other
-        self.value %= self.modulus.value
+        self.value %= self.modulus
         return self
 
     def __rshift__(self, other):
@@ -218,7 +215,7 @@ class BinaryFieldElement():
             return NotImplemented
 
         self.value *= type(self)(1 << other).reciprocal().value
-        self.value %= self.modulus.value
+        self.value %= self.modulus
         return self
 
     def __repr__(self):

@@ -19,8 +19,7 @@ import random
 import sys
 from elgamal import generate_keys, encrypt, decrypt
 from mpyc.runtime import mpc
-import os
-import multiprocessing
+from complaint import complain
 
 
 if not isinstance(int(sys.argv[1]), int) or not isinstance(int(sys.argv[2]), int):
@@ -38,10 +37,9 @@ total_unit = int(sys.argv[2])  # total unit of goods we have
 bids = [[None] * (n + 1)] * MAX_NUM  # buyer's bids, random generation
 Key = dict()  # elgamal keys
 
-
 async def main():
-    '''offline phase, bid generation'''
 
+    '''offline phase, bid generation'''
     for i in range(m):
         Key[i] = {'privateKey': [None] * 3, 'publicKey': [None] * 3}
     Key[pid] = generate_keys(5, 100)
@@ -99,6 +97,7 @@ async def main():
         await ZK2(win, find_win(c))
 
     await mpc.shutdown()
+
 
 
 # buyer's bid, random generation
@@ -283,7 +282,6 @@ async def ZK2(x1, x2):
             print("Found cheater, player ", i)
             return False
     return True
-
 
 if __name__ == '__main__':
     mpc.run(main())

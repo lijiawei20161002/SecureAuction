@@ -6,6 +6,7 @@ from mpyc.runtime import mpc
 
 m = len(mpc.parties)
 sec_num = mpc.SecInt()
+rep = [1] * m
 
 
 def vector_sec(v):
@@ -59,6 +60,7 @@ with open('board.txt', 'a+') as file:
         file.write(i+'\t')
     file.write('\n')
 
+
 async def complain():
     await mpc.start()
 
@@ -69,9 +71,11 @@ async def complain():
         if f(i) != 0:
             cheat = True
             print(str(mpc.pid)+" cheated!")
+            rep[i] -= 0.2
     if not cheat:
         if sum(z) != s:
             print(str(mpc.pid)+" cheated!")
+            rep[i] -= 0.2
         else:
             print(str(mpc.pid)+" is innocent!")
 
